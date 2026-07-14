@@ -7,7 +7,7 @@ import calendar
 st.set_page_config(page_title="Laporan Meteorologi Lengkap", layout="wide")
 
 st.title("🌦️ Auto-Rekapitulasi Data Meteorologi")
-st.write("Aplikasi ini akan memilah file CSV mentah (seperti `job_3069.csv`) menjadi berbagai Sheet Excel yang rapi per parameter (Suhu, RH, QFE, Tekanan Uap, dll).")
+st.write("Aplikasi ini disesuaikan khusus untuk format ekstrak CSV Stasiun Meteorologi. File akan diubah menjadi Laporan Excel Multi-Sheet yang siap cetak.")
 
 # --- RUMUS MENGHITUNG TEKANAN UAP AIR ---
 def hitung_tekanan_uap_excel(suhu, rh):
@@ -15,10 +15,11 @@ def hitung_tekanan_uap_excel(suhu, rh):
         return np.nan
     es = 6.112 * np.exp((17.67 * suhu) / (suhu + 243.5))
     e_actual = (rh / 100.0) * es
-    return round(e_actual * 10, 2)  # Sesuai format Excel Anda (ratusan)
+    return round(e_actual * 10, 2)
 
-# --- DAFTAR PARAMETER YANG AKAN DIBUATKAN SHEET-NYA ---
-# Format: {"Nama Kolom di CSV": "NAMA SHEET DI EXCEL"}
+# =====================================================================
+# --- DAFTAR PARAMETER DISESUAIKAN DENGAN FILE job_3069.csv ---
+# =====================================================================
 parameter_mapping = {
     'Tekanan_Uap_x10': 'TEKANAN UAP AIR',
     'temp_drybulb_c_tttttt': 'SUHU BOLA KERING',
@@ -26,7 +27,10 @@ parameter_mapping = {
     'relative_humidity_pc': 'KELEMBAPAN (RH)',
     'temp_dewpoint_c_tdtdtd': 'TITIK EMBUN (DEW)',
     'pressure_qfe_mb_derived': 'TEKANAN QFE',
-    'pressure_qff_mb_derived': 'TEKANAN QFF'
+    'pressure_qff_mb_derived': 'TEKANAN QFF',
+    'pressure_reading_mb': 'PRESSURE READING',
+    'temp_max_c_txtxtx': 'SUHU MAKSIMUM',
+    'temp_min_c_tntntn': 'SUHU MINIMUM'
 }
 
 uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG Anda", type=["csv"])
@@ -50,7 +54,7 @@ if uploaded_file is not None:
                 axis=1
             )
         
-        # Filter pilihan bulan jika datanya berbulan-bulan (agar tidak kepanjangan saat preview)
+        # Filter pilihan bulan
         df_raw['Bulan_Tahun'] = df_raw['Tahun'].astype(str) + "-" + df_raw['Bulan_Angka'].astype(str).str.zfill(2)
         daftar_bulan_unik = sorted(df_raw['Bulan_Tahun'].unique())
         
@@ -78,8 +82,10 @@ if uploaded_file is not None:
             st.write("### 📑 Preview Data (Sampel)")
             
             # 4. Looping untuk membuat Sheet per Parameter
+            sheet_terbuat = 0
             for kolom_csv, nama_sheet in parameter_mapping.items():
                 if kolom_csv in df_bulan_ini.columns:
+                    sheet_terbuat += 1
                     
                     # Buat Pivot Table per parameter
                     pivot = df_bulan_ini.pivot_table(index='Tanggal', columns='Jam', values=kolom_csv, aggfunc='first')
@@ -101,13 +107,14 @@ if uploaded_file is not None:
                     else:
                         pivot['R A T A   2'] = pivot.iloc[:, 0:24].mean(axis=1)
                         
-                    # Tampilkan sedikit preview di layar aplikasi (menggunakan Expander)
+                    # Tampilkan sedikit preview di layar aplikasi
                     with st.expander(f"Preview Tabel: {nama_sheet}"):
                         st.dataframe(pivot.style.format(precision=1), use_container_width=True)
                     
                     # 5. Tulis ke dalam Sheet Excel
-                    pivot.to_excel(writer, sheet_name=nama_sheet[:31]) # Excel membatasi nama sheet max 31 karakter
-                    worksheet = writer.sheets[nama_sheet[:31]]
+                    safe_sheet_name = nama_sheet[:31] # Excel membatasi nama sheet max 31 karakter
+                    pivot.to_excel(writer, sheet_name=safe_sheet_name)
+                    worksheet = writer.sheets[safe_sheet_name]
                     
                     # 6. Percantik Sheet-nya
                     worksheet.set_column('A:A', 8, format_tanggal)
@@ -116,9 +123,12 @@ if uploaded_file is not None:
                     worksheet.write(0, 0, "NO.", format_judul)
                     for col_num, value in enumerate(pivot.columns.values):
                         worksheet.write(0, col_num + 1, value, format_judul)
+            
+            if sheet_terbuat == 0:
+                st.warning("Tidak ada kolom parameter yang cocok ditemukan di file CSV ini.")
 
         # ==========================================
-        st.success("✅ File Excel Rapi dengan Multi-Parameter siap diunduh!")
+        st.success(f"✅ Berhasil! File Excel berisi {sheet_terbuat} Sheet Parameter siap diunduh.")
         
         st.download_button(
             label=f"Unduh Excel Laporan {bulan_dipilih} (.xlsx)",
@@ -128,4 +138,4 @@ if uploaded_file is not None:
         )
             
     except Exception as e:
-        st.error(f"Terjadi kesalahan: {e}")
+        st.error(f"Terjadi kesalahan saat memproses data: {e}")

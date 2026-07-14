@@ -1,13 +1,13 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="Kalkulator RH & Tekanan Uap Otomatis", layout="centered")
+st.set_page_config(page_title="Kalkulator Tekanan Uap Otomatis", layout="centered")
 
-st.title("⚡ Aplikasi Meteorologi: Hitung RH & Koreksi Suhu Otomatis")
-st.write("Aplikasi ini otomatis menghitung Persen Kelembapan (RH) berdasarkan referensi log Excel Anda.")
+st.title("🧮 Kalkulator Tekanan Uap Air Otomatis")
+st.write("Masukkan nilai Suhu dan Persen RH dari hasil pengamatan. Aplikasi akan mencari nilai Koreksi Suhu dan menghitung Tekanan Uap Air secara otomatis.")
 
-# Data Tabel Koreksi Suhu (Baris 17°C - 38°C, Kolom Desimal .0 sampai .9)
+# --- TABEL REFERENSI KOREKSI SUHU DARI EXCEL ---
+# Format: Suhu Bulat: [Desimal .0, .1, .2, .3, .4, .5, .6, .7, .8, .9]
 tabel_suhu = {
     17: [18.8, 18.9, 19.1, 19.2, 19.4, 19.5, 19.7, 19.8, 20.0, 20.2],
     18: [20.4, 20.5, 20.6, 20.8, 20.9, 21.1, 21.2, 21.4, 21.5, 21.7],
@@ -33,52 +33,44 @@ tabel_suhu = {
     38: [66.3, 66.6, 67.0, 67.3, 67.7, 68.1, 68.4, 68.6, 69.2, 69.4]
 }
 
-# --- INPUT FORM UTAMA ---
-st.subheader("📝 Input Data Observasi")
-
-col1, col2 = st.columns(2)
-with col1:
-    suhu_input = st.number_input("1. Masukkan Suhu Udara (°C):", min_value=17.0, max_value=38.9, value=25.4, step=0.1)
-with col2:
-    uap_input = st.number_input("2. Masukkan Tekanan Uap Air (x0.1 hPa):", min_value=0.0, max_value=500.0, value=252.9, step=0.1)
-
+# --- INPUT FORM DARI USER ---
 st.markdown("---")
+col1, col2 = st.columns(2)
 
-# --- PROSES PERHITUNGAN OTOMATIS SIMULTAN ---
+with col1:
+    suhu_input = st.number_input("1. Masukkan Suhu (°C):", min_value=17.0, max_value=38.9, value=25.4, step=0.1)
+    
+with col2:
+    rh_input = st.number_input("2. Masukkan Persen RH (%):", min_value=1, max_value=100, value=80, step=1)
+
+# --- PROSES PENCARIAN & PERHITUNGAN ---
+# Mencari koordinat tabel (Suhu Bulat dan Angka Desimalnya)
 suhu_bulat = int(np.floor(suhu_input))
 desimal = int(round((suhu_input - suhu_bulat) * 10))
+
+# Antisipasi pembulatan angka .999 menjadi 1.0
 if desimal == 10:
     suhu_bulat += 1
     desimal = 0
 
+st.markdown("---")
+
 if suhu_bulat in tabel_suhu:
-    # 1. Dapatkan Nilai Tekanan Uap Jenuh (E_s) dari tabel koreksi suhu
-    e_s = tabel_suhu[suhu_bulat][desimal]
+    # 1. Menarik angka Koreksi Suhu dari tabel
+    koreksi_suhu_es = tabel_suhu[suhu_bulat][desimal]
     
-    # 2. Konversi Tekanan Uap Input ke satuan hPa utuh (e)
-    e_actual = uap_input / 10
+    # 2. Menghitung Tekanan Uap (e)
+    # Rumus = (RH * e_s / 100) * 10 (dikali 10 agar sesuai format file xls Anda)
+    tekanan_uap_actual = (rh_input * koreksi_suhu_es / 100) * 10
     
-    # 3. Hitung Persen RH otomatis
-    rh_kalkulasi = (e_actual / e_s) * 100
-    # Memastikan nilai RH tidak melebihi 100% secara logika matematis
-    if rh_kalkulasi > 100.0:
-        rh_kalkulasi = 100.0
-
-    # --- TAMPILKAN HASIL REAL-TIME ---
-    st.subheader("📊 Hasil Perhitungan Otomatis Sistem:")
+    # --- MENAMPILKAN HASILNYA ---
+    st.subheader("✅ Hasil Perhitungan Sistem:")
     
-    c1, c2, c3 = st.columns(3)
-    c1.metric(label="Tekanan Uap Jenuh ($e_s$)", value=f"{e_s} hPa")
-    c2.metric(label="Tekanan Uap Aktual ($e$)", value=f"{e_actual:.2f} hPa")
+    c1, c2 = st.columns(2)
+    c1.metric(label="Nilai Koreksi Suhu Ditemukan", value=f"{koreksi_suhu_es}")
     
-    # Beri warna hijau/highlight besar untuk Persen RH sebagai output utama
-    st.info(f"### 🎯 Nilai Kelembapan Udara (Persen RH): **{rh_kalkulasi:.1f} %**")
+    # Menampilkan Hasil Utama
+    st.success(f"### 💧 Nilai Tekanan Uap Air: **{tekanan_uap_actual:.1f}**")
     
-    # Keterangan tambahan untuk validasi petugas
-    if rh_kalkulasi < 30:
-        st.warning("⚠️ Kondisi Udara Sangat Kering.")
-    elif rh_kalkulasi > 95:
-        st.write("💧 Kondisi Udara Sangat Lembap / Jenuh Udara Basah.")
-
 else:
-    st.error("Suhu yang Anda masukkan berada di luar jangkauan tabel matriks referensi.")
+    st.error("Suhu yang Anda masukkan berada di luar jangkauan tabel matriks referensi (17°C - 38°C).")

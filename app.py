@@ -7,7 +7,7 @@ import calendar
 st.set_page_config(page_title="Laporan Meteorologi Lengkap", layout="wide")
 
 st.title("🌦️ Auto-Rekapitulasi Data Meteorologi")
-st.write("Aplikasi ini disesuaikan khusus untuk format ekstrak CSV Stasiun Meteorologi. File akan diubah menjadi Laporan Excel Multi-Sheet yang siap cetak.")
+st.write("Aplikasi ini memilah file CSV raw data stasiun menjadi Laporan Excel Multi-Sheet yang sangat lengkap dan siap cetak.")
 
 # --- RUMUS MENGHITUNG TEKANAN UAP AIR ---
 def hitung_tekanan_uap_excel(suhu, rh):
@@ -18,7 +18,7 @@ def hitung_tekanan_uap_excel(suhu, rh):
     return round(e_actual * 10, 2)
 
 # =====================================================================
-# --- DAFTAR PARAMETER DISESUAIKAN DENGAN FILE job_3069.csv ---
+# --- DAFTAR PARAMETER (DISESUAIKAN DENGAN FILE job_3071.csv) ---
 # =====================================================================
 parameter_mapping = {
     'Tekanan_Uap_x10': 'TEKANAN UAP AIR',
@@ -30,7 +30,9 @@ parameter_mapping = {
     'pressure_qff_mb_derived': 'TEKANAN QFF',
     'pressure_reading_mb': 'PRESSURE READING',
     'temp_max_c_txtxtx': 'SUHU MAKSIMUM',
-    'temp_min_c_tntntn': 'SUHU MINIMUM'
+    'temp_min_c_tntntn': 'SUHU MINIMUM',
+    'wind_speed_ff': 'KECEPATAN ANGIN (FF)',
+    'wind_dir_deg_dd': 'ARAH ANGIN (DD)'
 }
 
 uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG Anda", type=["csv"])
@@ -107,7 +109,7 @@ if uploaded_file is not None:
                     else:
                         pivot['R A T A   2'] = pivot.iloc[:, 0:24].mean(axis=1)
                         
-                    # Tampilkan sedikit preview di layar aplikasi
+                    # Tampilkan preview di layar
                     with st.expander(f"Preview Tabel: {nama_sheet}"):
                         st.dataframe(pivot.style.format(precision=1), use_container_width=True)
                     

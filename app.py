@@ -2,17 +2,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="Aplikasi Input & Kalkulator Meterologi", layout="centered")
+st.set_page_config(page_title="Kalkulator RH & Tekanan Uap Otomatis", layout="centered")
 
-st.title("📱 Aplikasi Input Data & Kalkulator Tekanan Uap Air")
-st.write("Silakan pilih menu di bawah ini untuk melakukan input atau perhitungan otomatis.")
+st.title("⚡ Aplikasi Meteorologi: Hitung RH & Koreksi Suhu Otomatis")
+st.write("Aplikasi ini otomatis menghitung Persen Kelembapan (RH) berdasarkan referensi log Excel Anda.")
 
-# Membuat Menu Navigasi Sederhana
-menu = st.sidebar.selectbox("Pilih Menu:", ["1. Kalkulator Koreksi Suhu", "2. Input Log Data Harian"])
-
-# --- DATA REFERENSI TABEL KOREKSI SUHU (DARI EXCEL ANDA) ---
-# Menyusun data dari baris 17 sampai 38 dengan desimal .0 sampai .9
-tabel_data = {
+# Data Tabel Koreksi Suhu (Baris 17°C - 38°C, Kolom Desimal .0 sampai .9)
+tabel_suhu = {
     17: [18.8, 18.9, 19.1, 19.2, 19.4, 19.5, 19.7, 19.8, 20.0, 20.2],
     18: [20.4, 20.5, 20.6, 20.8, 20.9, 21.1, 21.2, 21.4, 21.5, 21.7],
     19: [21.8, 22.0, 22.0, 22.3, 22.5, 22.6, 22.8, 22.9, 23.1, 23.2],
@@ -37,73 +33,52 @@ tabel_data = {
     38: [66.3, 66.6, 67.0, 67.3, 67.7, 68.1, 68.4, 68.6, 69.2, 69.4]
 }
 
-# ================= MENU 1: KALKULATOR KOREKSI SUHU =================
-if menu == "1. Kalkulator Koreksi Suhu":
-    st.subheader("🔍 Hitung Otomatis Nilai Koreksi Suhu")
-    st.write("Masukkan nilai suhu udara hasil pengamatan untuk mendapatkan nilai koreksi jenuhnya secara otomatis.")
-    
-    # Input Angka dari User
-    input_suhu = st.number_input("Masukkan Nilai Suhu (°C) - Contoh: 25.4", 
-                                 min_value=17.0, max_value=38.9, 
-                                 value=25.0, step=0.1)
-    
-    # Proses Perhitungan Otomatis
-    suhu_bulat = int(np.floor(input_suhu))
-    desimal = int(round((input_suhu - suhu_bulat) * 10))
-    if desimal == 10:  # Antisipasi error pembulatan float
-        suhu_bulat += 1
-        desimal = 0
-        
-    if suhu_bulat in tabel_data:
-        nilai_koreksi = tabel_data[suhu_bulat][desimal]
-        
-        # Tampilkan Hasil di Kotak Hijau Besar
-        st.success(f"### 💡 Hasil Perhitungan Otomatis:")
-        st.write(f"Suhu Udara: **{input_suhu} °C**")
-        st.write(f"Nilai Tekanan Uap Jenuh / Koreksi: **{nilai_koreksi}**")
-    else:
-        st.warning("Maaf, data suhu di luar jangkauan tabel referensi (17°C - 38°C).")
+# --- INPUT FORM UTAMA ---
+st.subheader("📝 Input Data Observasi")
 
+col1, col2 = st.columns(2)
+with col1:
+    suhu_input = st.number_input("1. Masukkan Suhu Udara (°C):", min_value=17.0, max_value=38.9, value=25.4, step=0.1)
+with col2:
+    uap_input = st.number_input("2. Masukkan Tekanan Uap Air (x0.1 hPa):", min_value=0.0, max_value=500.0, value=252.9, step=0.1)
 
-# ================= MENU 2: INPUT LOG DATA HARIAN =================
-elif menu == "2. Input Log Data Harian":
-    st.subheader("📝 Form Pengisian Log Tekanan Uap Air Bulanan")
-    st.write("Gunakan form ini untuk memasukkan data harian baru ke dalam sistem rekapitulasi.")
+st.markdown("---")
+
+# --- PROSES PERHITUNGAN OTOMATIS SIMULTAN ---
+suhu_bulat = int(np.floor(suhu_input))
+desimal = int(round((suhu_input - suhu_bulat) * 10))
+if desimal == 10:
+    suhu_bulat += 1
+    desimal = 0
+
+if suhu_bulat in tabel_suhu:
+    # 1. Dapatkan Nilai Tekanan Uap Jenuh (E_s) dari tabel koreksi suhu
+    e_s = tabel_suhu[suhu_bulat][desimal]
     
-    # Inisialisasi tabel memori kosong (1-30 Hari, 24 Jam) jika belum ada
-    if 'tabel_rekap' not in st.session_state:
-        st.session_state.tabel_rekap = pd.DataFrame(
-            np.nan, 
-            index=[f"Tanggal {i}" for i in range(1, 32)], 
-            columns=[f"Jam {j:02d}.00" for j in range(24)]
-        )
+    # 2. Konversi Tekanan Uap Input ke satuan hPa utuh (e)
+    e_actual = uap_input / 10
     
-    # Form Input Komponen
-    with st.form("form_log"):
-        col1, col2 = st.columns(2)
-        with col1:
-            tgl_input = st.number_input("Pilih Tanggal (1-31):", min_value=1, max_value=31, value=1)
-            jam_input = st.selectbox("Pilih Jam Observasi:", [f"Jam {j:02d}.00" for j in range(24)])
-        with col2:
-            nilai_input = st.number_input("Masukkan Nilai Tekanan Uap (x0.1 hPa):", min_value=0.0, max_value=500.0, value=250.0, step=0.1)
-            
-        submit_btn = st.form_submit_button("Simpan Data Ke Tabel Rekap")
-        
-    if submit_btn:
-        # Menyimpan data yang diinput ke tabel di memori aplikasi
-        st.session_state.tabel_rekap.at[f"Tanggal {tgl_input}", jam_input] = nilai_input
-        st.success(f"Data Tanggal {tgl_input} {jam_input} sebesar {nilai_input} Berhasil Disimpan!")
-        
-    # Menampilkan Hasil Rekap Sementara yang mirip dengan Excel Anda
-    st.markdown("---")
-    st.subheader("📊 Tabel Rekapitulasi Sementara Bulanan")
+    # 3. Hitung Persen RH otomatis
+    rh_kalkulasi = (e_actual / e_s) * 100
+    # Memastikan nilai RH tidak melebihi 100% secara logika matematis
+    if rh_kalkulasi > 100.0:
+        rh_kalkulasi = 100.0
+
+    # --- TAMPILKAN HASIL REAL-TIME ---
+    st.subheader("📊 Hasil Perhitungan Otomatis Sistem:")
     
-    # Menghitung Rata-rata otomatis per baris (Tanggal) seperti kolom RATA 2 di Excel Anda
-    df_tampil = st.session_state.tabel_rekap.copy()
-    df_tampil['RATA-RATA (hPa)'] = df_tampil.mean(axis=1) / 10 # dibagi 10 seperti logika excel anda
+    c1, c2, c3 = st.columns(3)
+    c1.metric(label="Tekanan Uap Jenuh ($e_s$)", value=f"{e_s} hPa")
+    c2.metric(label="Tekanan Uap Aktual ($e$)", value=f"{e_actual:.2f} hPa")
     
-    st.dataframe(df_tampil.style.highlight_max(axis=0, color='#ffcccc').highlight_min(axis=0, color='#cceffc'))
+    # Beri warna hijau/highlight besar untuk Persen RH sebagai output utama
+    st.info(f"### 🎯 Nilai Kelembapan Udara (Persen RH): **{rh_kalkulasi:.1f} %**")
     
-    # Tombol download hasil inputan menjadi CSV baru jika diinginkan
-    csv = df_tampil.to_csv().encode('utf-8')
-    st.download_button("📥 Unduh Hasil Rekap (.csv)", data=csv, file_name="REKAP_TEKANAN_UAP_BARU.csv", mime="text/csv")
+    # Keterangan tambahan untuk validasi petugas
+    if rh_kalkulasi < 30:
+        st.warning("⚠️ Kondisi Udara Sangat Kering.")
+    elif rh_kalkulasi > 95:
+        st.write("💧 Kondisi Udara Sangat Lembap / Jenuh Udara Basah.")
+
+else:
+    st.error("Suhu yang Anda masukkan berada di luar jangkauan tabel matriks referensi.")

@@ -7,7 +7,7 @@ import calendar
 st.set_page_config(page_title="Generator Matriks Fklim BMKG", layout="wide")
 
 st.title("📊 Auto-Generate Excel Matriks Fklim (1 Sheet)")
-st.write("Format 100% Standar Fklim. Logika kolom tambahan (Jam spesifik / Max Harian / Summary Bawah) telah disesuaikan secara individual untuk setiap parameter.")
+st.write("Format 100% Standar Fklim. Data diekspor sebagai **ANGKA MURNI (Numeric)** dengan *Excel Custom Format*, sehingga sel bisa dihitung / dimasukkan rumus matematika tanpa error `#DIV/0!`.")
 
 # --- RUMUS TEKANAN UAP AIR ---
 def hitung_tekanan_uap_excel(suhu, rh):
@@ -15,22 +15,6 @@ def hitung_tekanan_uap_excel(suhu, rh):
     es = 6.112 * np.exp((17.67 * suhu) / (suhu + 243.5))
     e_actual = (rh / 100.0) * es
     return round(e_actual * 10, 2) 
-
-# --- FUNGSI FORMATTING KHUSUS SYNOP ---
-def fmt_q_str(val):
-    if pd.isna(val): return ""
-    try: return f"{(int(round(float(val) * 10)) % 10000):04d}" 
-    except: return ""
-
-def fmt_t_str(val):
-    if pd.isna(val): return ""
-    try: return str(int(round(float(val) * 10))) 
-    except: return ""
-
-def fmt_int_str(val):
-    if pd.isna(val): return ""
-    try: return str(int(round(float(val)))) 
-    except: return ""
 
 # --- PARAMETER MAPPING ---
 parameter_mapping = {
@@ -76,56 +60,72 @@ if uploaded_file is not None:
         semua_tanggal = pd.Index(range(1, jml_hari + 1), name='NO.')
 
         # =====================================================================
-        # PROSES EXCEL
+        # PROSES EXCEL DENGAN NUMBER FORMATTING MURNI
         # =====================================================================
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             wb = writer.book
             ws = wb.add_worksheet('MATRIKS FKLIM')
             
+            # Format Kosmetik Dasar
             fmt_teks = wb.add_format({'bold': True, 'align': 'left'})
             fmt_judul = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 12})
             fmt_header = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#D9D9D9'})
+            fmt_blank = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
+            fmt_blank_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1'})
             
-            fmt_str_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
-            fmt_float_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'})
+            # FORMAT ANGKA MURNI (Excel akan menganggap ini NUMBER, bukan Text)
+            fmt_qff_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0000'}) # Menampilkan 111 jadi 0111
+            fmt_int_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0'})     # Menampilkan bulat
+            fmt_float_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'}) # Menampilkan 1 desimal
             
-            fmt_str_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1'})
-            fmt_float_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0', 'bg_color': '#DCE6F1'})
+            fmt_int_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1', 'num_format': '0'})
+            fmt_float_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1', 'num_format': '0.0'})
             
             fmt_summary_judul = wb.add_format({'bold': True, 'align': 'right', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FFF2CC'})
             fmt_summary_kosong = wb.add_format({'border': 1, 'bg_color': '#FFF2CC'})
-            fmt_summary_final = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FCD5B4', 'num_format': '0.0'})
-            fmt_summary_final_str = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FCD5B4'})
+            fmt_summary_final_int = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FCD5B4', 'num_format': '0'})
+            fmt_summary_final_float = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FCD5B4', 'num_format': '0.0'})
+            fmt_summary_final_blank = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FCD5B4'})
             
             ws.set_column('A:A', 6)
             ws.set_column('B:Y', 5)
             ws.set_column('Z:Z', 13)
-            ws.set_column('AA:AC', 10) # Diperlebar sedikit untuk tulisan MAX HARIAN
+            ws.set_column('AA:AC', 10) 
             
             start_row = 0
             
+            # Helper untuk mengembalikan tipe data Number (int/float) alih-alih String
             def get_cell(val, param, col_type):
                 if pd.isna(val): 
-                    return ("", fmt_str_rata2) if col_type == 'RATA2' else ("", fmt_str_biasa)
+                    return "", (fmt_blank_rata2 if col_type == 'RATA2' else fmt_blank)
                 
+                # KECEPATAN ANGIN
                 if 'KECEPATAN ANGIN' in param:
                     v = int(round(float(val)))
-                    res = "" if v == 0 else str(v)
-                    return (res, fmt_str_rata2) if col_type == 'RATA2' else (res, fmt_str_biasa)
+                    if v == 0:
+                        return "", (fmt_blank_rata2 if col_type == 'RATA2' else fmt_blank)
+                    return v, (fmt_int_rata2 if col_type == 'RATA2' else fmt_int_biasa)
                 
+                # QFF / QFE / SUHU UDARA (0-23)
                 if 'QFF' in param or 'QFE' in param or 'SUHU' in param:
                     if col_type == '0-23':
-                        if 'SUHU' in param: return fmt_t_str(val), fmt_str_biasa 
-                        return fmt_q_str(val), fmt_str_biasa 
-                    return round(float(val), 1), (fmt_float_rata2 if col_type == 'RATA2' else fmt_float_biasa)
+                        if 'SUHU' in param:
+                            return int(round(float(val) * 10)), fmt_int_biasa
+                        # Hitungan membuang ribuan QFF agar Excel format 0000 membacanya benar
+                        return (int(round(float(val) * 10)) % 10000), fmt_qff_biasa
+                    else:
+                        return round(float(val), 1), (fmt_float_rata2 if col_type == 'RATA2' else fmt_float_biasa)
                 
+                # RH / UAP AIR
                 if 'KELEMBABAN' in param or 'UAP AIR' in param:
-                    if col_type == 'RATA2': return round(float(val), 1), fmt_float_rata2
-                    return fmt_int_str(val), fmt_str_biasa
+                    if col_type == 'RATA2': 
+                        return round(float(val), 1), fmt_float_rata2
+                    return int(round(float(val))), fmt_int_biasa
                 
-                return val, fmt_str_biasa
+                return round(float(val), 1), (fmt_float_rata2 if col_type == 'RATA2' else fmt_float_biasa)
 
+            # LOOOPING PARAMETER
             for kolom_csv, judul_param in parameter_mapping.items():
                 if kolom_csv in df_bulan_ini.columns:
                     
@@ -166,7 +166,6 @@ if uploaded_file is not None:
                     for i in range(24): ws.write(start_row + 2, i + 1, str(i), fmt_header)
                     ws.write(start_row + 2, 25, "R A T A   2", fmt_header)
                     
-                    # Tulis Header Tambahan Kanan
                     for c_i, ext_hdr in enumerate(extra_headers):
                         ws.write(start_row + 2, 26 + c_i, ext_hdr, fmt_header)
                     
@@ -185,15 +184,15 @@ if uploaded_file is not None:
                         val_rata, fmt_rata = get_cell(rata_harian.loc[tgl], judul_param, 'RATA2')
                         ws.write(row_idx, 25, val_rata, fmt_rata)
                         
-                        # Data Tambahan Kanan (Custom)
+                        # Data Tambahan Kanan
                         if 'UAP AIR' in judul_param:
-                            pass # Kosong, tidak perlu nulis sel apa-apa
+                            pass
                         elif 'KECEPATAN ANGIN' in judul_param:
                             v_max = daily_max_angin.loc[tgl]
                             if pd.isna(v_max) or float(v_max) == 0:
-                                ws.write(row_idx, 26, "", fmt_str_biasa)
+                                ws.write(row_idx, 26, "", fmt_blank)
                             else:
-                                ws.write(row_idx, 26, str(int(round(float(v_max)))), fmt_str_biasa)
+                                ws.write(row_idx, 26, int(round(float(v_max))), fmt_int_biasa) # NUMBER
                         else:
                             for c_idx, h_spec in zip([26, 27, 28], [23, 5, 10]):
                                 val_s, fmt_s = get_cell(pivot.loc[tgl, h_spec], judul_param, 'SPEC')
@@ -201,20 +200,22 @@ if uploaded_file is not None:
                         
                         row_idx += 1
                         
-                    # TULIS SUMMARY BAWAH (Custom)
+                    # TULIS SUMMARY BAWAH
                     for label, final_val in summary_labels:
                         ws.merge_range(row_idx, 0, row_idx, 24, label, fmt_summary_judul)
                         
                         if pd.isna(final_val):
-                            ws.write(row_idx, 25, "", fmt_summary_final_str)
+                            ws.write(row_idx, 25, "", fmt_summary_final_blank)
                         else:
                             if 'KECEPATAN ANGIN' in judul_param:
                                 v_ang = int(round(float(final_val)))
-                                ws.write(row_idx, 25, "" if v_ang == 0 else str(v_ang), fmt_summary_final_str)
+                                if v_ang == 0:
+                                    ws.write(row_idx, 25, "", fmt_summary_final_blank)
+                                else:
+                                    ws.write(row_idx, 25, v_ang, fmt_summary_final_int) # NUMBER
                             else:
-                                ws.write(row_idx, 25, round(float(final_val), 1), fmt_summary_final)
+                                ws.write(row_idx, 25, round(float(final_val), 1), fmt_summary_final_float) # NUMBER
                         
-                        # Tulis blank format kosong ke kolom tambahan kanan agar border tabel rapi
                         for c_i in range(len(extra_headers)):
                             ws.write(row_idx, 26 + c_i, "", fmt_summary_kosong)
                         
@@ -222,7 +223,7 @@ if uploaded_file is not None:
                         
                     start_row = row_idx + 3 
 
-        st.success("✅ File Matriks Fklim berhasil di-Generate dan siap diunduh!")
+        st.success("✅ Format Angka Murni Diterapkan. Anda kini bisa menggunakan rumus Excel di sel mana pun!")
         st.download_button(
             label=f"📥 Unduh Laporan Fklim Lengkap ({bulan_dipilih})",
             data=buffer.getvalue(),

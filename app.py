@@ -4,259 +4,110 @@ import numpy as np
 import io
 import calendar
 
-st.set_page_config(page_title="Sistem Rekapitulasi & ME-45 BMKG", layout="wide")
+st.set_page_config(page_title="Laporan Matriks Data BMKG", layout="wide")
 
-st.title("🌦️ Auto-Generator Data Meteorologi & ME-45")
-st.write("Aplikasi ini secara otomatis mengonversi data ke dalam **Sandi SYNOP/ME-45 standar BMKG** dengan integrasi sistem pembersihan data otomatis (`NA_VALUES`).")
-
-# =====================================================================
-# 1. ATURAN PEMBERSIHAN DATA (Diadopsi dari pyreformatme45.py)
-# =====================================================================
-NA_VALUES = [
-    9999, 99999, '9999', '99999', '/', '//', '///', '////', '\\', '.', 
-    '#REF!', '#VALUE!', 'STNR', '#N/A', '#', 'N', '/A', '`', '*', 'Z', 
-    'A', 'C', 'AC', '*/', '+', 'CI', '0S', 'y', 'BN ', 'CNS SL RA', 
-    'CLD DECR', 'ALSE', 'cdd', 'L', 'x', 'E', '0`', '3            tidak ada hujan', 'FALSE'
-]
-
-# =====================================================================
-# 2. FUNGSI ENCODER SANDI SYNOP / ME-45
-# =====================================================================
-def format_suhu(val):
-    if pd.isna(val) or val == "": return ""
-    return str(int(round(float(val) * 10)))
-
-def format_tekanan(val):
-    if pd.isna(val) or val == "": return ""
-    p_int = int(round(float(val) * 10))
-    p_mod = p_int % 10000
-    return f"{p_mod:04d}"
-
-def format_umum(val):
-    if pd.isna(val) or val == "": return ""
-    return str(int(round(float(val))))
-
-def hitung_tekanan_uap_excel(suhu, rh):
-    if pd.isna(suhu) or pd.isna(rh): return np.nan
-    es = 6.112 * np.exp((17.67 * suhu) / (suhu + 243.5))
-    e_actual = (rh / 100.0) * es
-    return round(e_actual * 10, 2)
-
-# =====================================================================
-# MAPPING PARAMETER UNTUK LAPORAN PER JAM
-# =====================================================================
-parameter_mapping = {
-    'Tekanan_Uap_x10': 'TEKANAN UAP AIR',
-    'temp_drybulb_c_tttttt': 'SUHU BOLA KERING',
-    'temp_wetbulb_c': 'SUHU BOLA BASAH',
-    'relative_humidity_pc': 'KELEMBAPAN (RH)',
-    'temp_dewpoint_c_tdtdtd': 'TITIK EMBUN (DEW)',
-    'pressure_qfe_mb_derived': 'TEKANAN QFE',
-    'pressure_qff_mb_derived': 'TEKANAN QFF',
-    'pressure_reading_mb': 'PRESSURE READING',
-    'temp_max_c_txtxtx': 'SUHU MAKSIMUM',
-    'temp_min_c_tntntn': 'SUHU MINIMUM',
-    'wind_speed_ff': 'KECEPATAN ANGIN (FF)',
-    'wind_dir_deg_dd': 'ARAH ANGIN (DD)',
-    'visibility_vv': 'JARAK PANDANG (VV)',
-    'cloud_cover_oktas_m': 'TUTUPAN AWAN (OKTAS)',
-    'rainfall_24h_rrrr': 'CURAH HUJAN 24J'
-}
+st.title("📊 Auto-Generate Laporan Excel Matriks 24 Jam")
+st.write("Aplikasi ini akan mengubah data CSV Anda menjadi format Excel Matriks 24 Jam, lengkap dengan kolom **R A T A   2** dan ekstraksi jam spesifik (**23:00, 05:00, 10:00**).")
 
 uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG Anda", type=["csv"])
 
 if uploaded_file is not None:
     try:
-        # BACA DATA & TERAPKAN PEMBERSIHAN OTOMATIS (CLEANSING)
+        # 1. BACA DATA
         df_raw = pd.read_csv(uploaded_file)
         
-        # Sapu bersih semua data error berdasarkan blacklist NA_VALUES
+        # Sapu bersih data error standar (opsional untuk menjaga kebersihan data)
+        NA_VALUES = [9999, 99999, '9999', '/', '//', '///', '#REF!', '#VALUE!', 'STNR', '#N/A']
         df_raw.replace(NA_VALUES, np.nan, inplace=True)
         
-        # Parsing Waktu
+        # 2. PARSING WAKTU
         df_raw['data_timestamp'] = pd.to_datetime(df_raw['data_timestamp'])
         df_raw['Tahun'] = df_raw['data_timestamp'].dt.year
         df_raw['Bulan_Angka'] = df_raw['data_timestamp'].dt.month
         df_raw['Tanggal'] = df_raw['data_timestamp'].dt.day
         df_raw['Jam'] = df_raw['data_timestamp'].dt.hour
         
-        # Hitung Tekanan Uap
-        if 'temp_drybulb_c_tttttt' in df_raw.columns and 'relative_humidity_pc' in df_raw.columns:
-            df_raw['Tekanan_Uap_x10'] = df_raw.apply(
-                lambda row: hitung_tekanan_uap_excel(row['temp_drybulb_c_tttttt'], row['relative_humidity_pc']), axis=1)
-        
         df_raw['Bulan_Tahun'] = df_raw['Tahun'].astype(str) + "-" + df_raw['Bulan_Angka'].astype(str).str.zfill(2)
-        df_raw['Tanggal_Lengkap'] = df_raw['data_timestamp'].dt.strftime('%d %B %Y')
         
-        col_opt1, col_opt2 = st.columns(2)
-        with col_opt1:
-            bulan_dipilih = st.selectbox("Pilih Bulan (Laporan Per Jam):", sorted(df_raw['Bulan_Tahun'].unique()))
+        # 3. KONTROL MENU DI LAYAR
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        with col1:
+            bulan_dipilih = st.selectbox("1. Pilih Bulan Laporan:", sorted(df_raw['Bulan_Tahun'].unique()))
+            
+        with col2:
+            # Biarkan user memilih parameter apa yang mau dicetak (Dinamis dari header CSV)
+            kolom_abaikan = ['station_name', 'data_timestamp', 'created_at', 'updated_at', 'Tahun', 'Bulan_Angka', 'Tanggal', 'Jam', 'Bulan_Tahun']
+            pilihan_param = [col for col in df_raw.columns if col not in kolom_abaikan]
+            param_dipilih = st.selectbox("2. Pilih Parameter yang ingin direkap (misal: pressure_qff_mb_derived):", pilihan_param)
+            
         df_bulan_ini = df_raw[df_raw['Bulan_Tahun'] == bulan_dipilih]
         
-        with col_opt2:
-            tanggal_dipilih = st.selectbox("Pilih Tanggal (Form ME-45):", sorted(df_bulan_ini['Tanggal_Lengkap'].unique()))
-            
         tahun_val = int(bulan_dipilih.split('-')[0])
         bulan_val = int(bulan_dipilih.split('-')[1])
         jml_hari = calendar.monthrange(tahun_val, bulan_val)[1]
 
-        # =====================================================================
-        # PROSES 1: LAPORAN PER JAM (SYNOP STRING TANPA KOMA)
-        # =====================================================================
-        buffer_jam = io.BytesIO()
-        with pd.ExcelWriter(buffer_jam, engine='xlsxwriter') as writer_jam:
-            wb_jam = writer_jam.book
-            fmt_judul = wb_jam.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#8DB4E2', 'border': 1})
-            fmt_data = wb_jam.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
-            fmt_tgl = wb_jam.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#EBF1DE', 'border': 1})
+        # 4. PROSES PEMBUATAN TABEL MATRIKS
+        if st.button("🚀 Buat Laporan Excel"):
             
-            for kolom_csv, nama_sheet in parameter_mapping.items():
-                if kolom_csv in df_bulan_ini.columns:
-                    pivot_raw = df_bulan_ini.pivot_table(index='Tanggal', columns='Jam', values=kolom_csv, aggfunc='first')
-                    
-                    kolom_jam_str = [str(h) for h in range(24)] # 0, 1, 2...
-                    semua_tanggal = pd.Index(range(1, jml_hari + 1), name='NO.')
-                    pivot_fmt = pd.DataFrame(index=semua_tanggal, columns=kolom_jam_str + ['RATA-RATA'])
-                    
-                    rata_rata_raw = pivot_raw.mean(axis=1)
-                    
-                    for tgl in semua_tanggal:
-                        for h in range(24):
-                            val_raw = pivot_raw.loc[tgl, h] if (tgl in pivot_raw.index and h in pivot_raw.columns) else np.nan
-                            
-                            if pd.isna(val_raw):
-                                pivot_fmt.loc[tgl, str(h)] = ""
-                            elif 'pressure' in kolom_csv and 'q' in kolom_csv or kolom_csv == 'pressure_reading_mb':
-                                pivot_fmt.loc[tgl, str(h)] = format_tekanan(val_raw)
-                            elif 'temp_' in kolom_csv:
-                                pivot_fmt.loc[tgl, str(h)] = format_suhu(val_raw)
-                            elif kolom_csv == 'Tekanan_Uap_x10':
-                                pivot_fmt.loc[tgl, str(h)] = format_umum(val_raw)
-                            else:
-                                pivot_fmt.loc[tgl, str(h)] = format_umum(val_raw)
-                                
-                        mean_raw = rata_rata_raw.loc[tgl] if tgl in rata_rata_raw.index else np.nan
-                        if pd.isna(mean_raw):
-                            pivot_fmt.loc[tgl, 'RATA-RATA'] = ""
-                        elif 'pressure' in kolom_csv and 'q' in kolom_csv or kolom_csv == 'pressure_reading_mb':
-                            pivot_fmt.loc[tgl, 'RATA-RATA'] = format_tekanan(mean_raw)
-                        elif 'temp_' in kolom_csv:
-                            pivot_fmt.loc[tgl, 'RATA-RATA'] = format_suhu(mean_raw)
-                        else:
-                            pivot_fmt.loc[tgl, 'RATA-RATA'] = format_umum(mean_raw)
-
-                    safe_sheet_name = nama_sheet[:31]
-                    pivot_fmt.to_excel(writer_jam, sheet_name=safe_sheet_name)
-                    ws_jam = writer_jam.sheets[safe_sheet_name]
-                    
-                    ws_jam.set_column('A:A', 8, fmt_tgl)
-                    ws_jam.set_column('B:Z', 7, fmt_data)
-                    ws_jam.write(0, 0, "NO.", fmt_judul)
-                    for col_num, value in enumerate(pivot_fmt.columns.values):
-                        ws_jam.write(0, col_num + 1, value, fmt_judul)
-
-        # =====================================================================
-        # PROSES 2: EXCEL FORM ME-45 HARIAN (SESUAI PDF KERTAS)
-        # =====================================================================
-        df_hari_ini = df_raw[df_raw['Tanggal_Lengkap'] == tanggal_dipilih].copy()
-        df_hari_ini = df_hari_ini.set_index('Jam')
-        
-        kolom_me45_pdf = [
-            'GMT', 'N dd ff VV', 'ww w1w2', 'TTT', 'TdTdTd', 'TwTwTw', 'QFF', 'QFE',
-            'Tx Tx Tx', 'Tn Tn Tn E E E', 'F24 F24', 'P24 P24 iw', 'ix iR IE', 'RRRtR',
-            'ChshsChshs 0 S', 'C Daec UU', 'TTTNCLhCCN MHs h'
-        ]
-        me45_df = pd.DataFrame(index=range(24), columns=kolom_me45_pdf)
-        me45_df.fillna("", inplace=True)
-        
-        # --- Fungsi Pembuat Sandi Sempurna ---
-        def get_sandi_angin(jam):
-            if jam not in df_hari_ini.index: return ""
-            row = df_hari_ini.loc[jam]
+            # Pivot tabel jam 0-23
+            # Pastikan datanya numerik agar bisa dihitung rata-ratanya
+            df_bulan_ini[param_dipilih] = pd.to_numeric(df_bulan_ini[param_dipilih], errors='coerce')
             
-            N = str(int(row['cloud_cover_oktas_m'])) if 'cloud_cover_oktas_m' in row and pd.notna(row['cloud_cover_oktas_m']) else "/"
-            dd = f"{int(round(float(row['wind_dir_deg_dd']) / 10)):02d}" if 'wind_dir_deg_dd' in row and pd.notna(row['wind_dir_deg_dd']) else "//"
-            ff = f"{int(float(row['wind_speed_ff'])):02d}" if 'wind_speed_ff' in row and pd.notna(row['wind_speed_ff']) else "//"
+            pivot = df_bulan_ini.pivot_table(index='Tanggal', columns='Jam', values=param_dipilih, aggfunc='first')
             
-            VV = "//"
-            if 'visibility_vv' in row and pd.notna(row['visibility_vv']):
-                km = float(row['visibility_vv'])
-                if km < 5.1: VV = f"{int(km*10):02d}"
-                elif km < 31: VV = f"{int(km)+50:02d}"
-                elif km < 71: VV = f"{int(km/5)+80:02d}"
-                else: VV = "99"
+            # Pastikan kolom 0-23 ada
+            for h in range(24):
+                if h not in pivot.columns:
+                    pivot[h] = np.nan
+            pivot = pivot[list(range(24))]
+            
+            # Ganti header jam menjadi string
+            pivot.columns = [str(h) for h in range(24)]
+            
+            # Susun baris tanggal (1 sampai akhir bulan)
+            semua_tanggal = pd.Index(range(1, jml_hari + 1), name='NO.')
+            pivot = pivot.reindex(semua_tanggal)
+            
+            # Tambahkan Kolom Rata-rata
+            pivot['R A T A   2'] = pivot.iloc[:, 0:24].mean(axis=1)
+            
+            # Tambahkan Kolom Jam Spesifik (23, 05, 10)
+            pivot[' 23 00'] = pivot['23']
+            pivot[' 05 00'] = pivot['5']
+            # Jam 10 bisa kosong jika belum jamnya, amankan dengan get()
+            pivot[' 10 00'] = pivot.get('10', np.nan)
+            
+            st.success("✅ Tabel berhasil dibuat! Preview sebagian data:")
+            st.dataframe(pivot.style.format(precision=1), use_container_width=True)
+            
+            # 5. EXPORT KE EXCEL
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                wb = writer.book
+                fmt_judul = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D9D9D9', 'border': 1})
+                fmt_data = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'})
+                fmt_tgl = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#F2F2F2', 'border': 1})
                 
-            return f"{N} {dd} {ff} {VV}"
-
-        def get_sandi_cuaca(jam):
-            if jam not in df_hari_ini.index: return ""
-            row = df_hari_ini.loc[jam]
-            ww = f"{int(float(row['present_weather_ww'])):02d}" if 'present_weather_ww' in row and pd.notna(row['present_weather_ww']) else "//"
-            w1 = str(int(float(row['past_weather_w1']))) if 'past_weather_w1' in row and pd.notna(row['past_weather_w1']) else "/"
-            w2 = str(int(float(row['past_weather_w2']))) if 'past_weather_w2' in row and pd.notna(row['past_weather_w2']) else "/"
+                pivot.to_excel(writer, sheet_name=param_dipilih[:31])
+                ws = writer.sheets[param_dipilih[:31]]
+                
+                # Desain lebar kolom
+                ws.set_column('A:A', 6, fmt_tgl)     # NO
+                ws.set_column('B:Y', 6, fmt_data)    # Jam 0-23
+                ws.set_column('Z:Z', 12, fmt_data)   # Rata-rata
+                ws.set_column('AA:AC', 8, fmt_data)  # Jam spesifik
+                
+                # Tulis ulang Header agar rapi
+                ws.write(0, 0, "NO.", fmt_judul)
+                for col_num, value in enumerate(pivot.columns.values):
+                    ws.write(0, col_num + 1, value, fmt_judul)
             
-            if ww == "//" and w1 == "/" and w2 == "/": return ""
-            return f"{ww} {w1}{w2}"
-
-        # Mengisi ME-45
-        for jam in range(24):
-            me45_df.at[jam, 'GMT'] = f"{jam:02d}"
-            me45_df.at[jam, 'N dd ff VV'] = get_sandi_angin(jam)
-            me45_df.at[jam, 'ww w1w2'] = get_sandi_cuaca(jam)
-            
-            if jam in df_hari_ini.index:
-                row = df_hari_ini.loc[jam]
-                if 'temp_drybulb_c_tttttt' in row: me45_df.at[jam, 'TTT'] = format_suhu(row['temp_drybulb_c_tttttt'])
-                if 'temp_dewpoint_c_tdtdtd' in row: me45_df.at[jam, 'TdTdTd'] = format_suhu(row['temp_dewpoint_c_tdtdtd'])
-                if 'temp_wetbulb_c' in row: me45_df.at[jam, 'TwTwTw'] = format_suhu(row['temp_wetbulb_c'])
-                if 'pressure_qff_mb_derived' in row: me45_df.at[jam, 'QFF'] = format_tekanan(row['pressure_qff_mb_derived'])
-                if 'pressure_qfe_mb_derived' in row: me45_df.at[jam, 'QFE'] = format_tekanan(row['pressure_qfe_mb_derived'])
-                if 'temp_max_c_txtxtx' in row: me45_df.at[jam, 'Tx Tx Tx'] = format_suhu(row['temp_max_c_txtxtx'])
-                if 'temp_min_c_tntntn' in row: me45_df.at[jam, 'Tn Tn Tn E E E'] = format_suhu(row['temp_min_c_tntntn'])
-        
-        buffer_me45 = io.BytesIO()
-        with pd.ExcelWriter(buffer_me45, engine='xlsxwriter') as writer_me45:
-            wb_me45 = writer_me45.book
-            fmt_hdr = wb_me45.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'text_wrap': True})
-            fmt_isi = wb_me45.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
-            fmt_jam = wb_me45.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1})
-            
-            me45_df.to_excel(writer_me45, sheet_name='ME45_HARIAN', index=False)
-            ws_me45 = writer_me45.sheets['ME45_HARIAN']
-            
-            ws_me45.set_column('A:A', 5, fmt_jam)
-            ws_me45.set_column('B:C', 13, fmt_isi)
-            ws_me45.set_column('D:Q', 9, fmt_isi)
-            
-            for col_num, value in enumerate(me45_df.columns):
-                ws_me45.write(0, col_num, value, fmt_hdr)
-
-        # =====================================================================
-        # ANTARMUKA
-        # =====================================================================
-        st.write("---")
-        st.write(f"### 📑 Preview Laporan ME-45 ({tanggal_dipilih})")
-        st.dataframe(me45_df, use_container_width=True)
-
-        st.success("✅ Format berhasil dikalibrasi ke standar SYNOP BMKG. Data rusak telah dibersihkan!")
-        dl_col1, dl_col2 = st.columns(2)
-        
-        with dl_col1:
             st.download_button(
-                label=f"📥 1. Unduh Laporan Per Jam ({bulan_dipilih})",
-                data=buffer_jam.getvalue(),
-                file_name=f"LAPORAN_JAM_BMKG_{bulan_dipilih}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            
-        with dl_col2:
-            st.download_button(
-                label=f"📥 2. Unduh Form ME-45 ({tanggal_dipilih})",
-                data=buffer_me45.getvalue(),
-                file_name=f"ME45_{tanggal_dipilih.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+                label="📥 Unduh File Excel Anda",
+                data=buffer.getvalue(),
+                file_name=f"LAPORAN_{param_dipilih.upper()}_{bulan_dipilih}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
     except Exception as e:

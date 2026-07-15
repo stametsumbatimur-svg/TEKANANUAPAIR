@@ -6,8 +6,8 @@ import calendar
 
 st.set_page_config(page_title="Laporan Meteorologi & ME-45", layout="wide")
 
-st.title("🌦️ Auto-Rekapitulasi Data Meteorologi & ME-45")
-st.write("Aplikasi ini menghasilkan dua output sekaligus: **Laporan Bulanan Per Jam (Multi-Sheet)** dan **Laporan Harian (Form ME-45)**.")
+st.title("🌦️ Auto-Rekapitulasi Data & Generator ME-45")
+st.write("Aplikasi ini menghasilkan dua output sekaligus: **Laporan Bulanan Per Jam (Multi-Sheet)** dan **Form ME-45 Harian (Terisi Penuh dengan Sandi Cuaca)**.")
 
 # --- RUMUS MENGHITUNG TEKANAN UAP AIR ---
 def hitung_tekanan_uap_excel(suhu, rh):
@@ -32,10 +32,13 @@ parameter_mapping = {
     'temp_max_c_txtxtx': 'SUHU MAKSIMUM',
     'temp_min_c_tntntn': 'SUHU MINIMUM',
     'wind_speed_ff': 'KECEPATAN ANGIN (FF)',
-    'wind_dir_deg_dd': 'ARAH ANGIN (DD)'
+    'wind_dir_deg_dd': 'ARAH ANGIN (DD)',
+    'visibility_vv': 'JARAK PANDANG (VV)',
+    'cloud_cover_oktas_m': 'TUTUPAN AWAN (OKTAS)',
+    'rainfall_24h_rrrr': 'CURAH HUJAN 24J'
 }
 
-uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG Anda", type=["csv"])
+uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG (Gunakan job_3137.csv agar ME-45 penuh)", type=["csv"])
 
 if uploaded_file is not None:
     try:
@@ -62,11 +65,10 @@ if uploaded_file is not None:
         with col_opt1:
             bulan_dipilih = st.selectbox("Pilih Bulan (Untuk Laporan Per Jam):", sorted(df_raw['Bulan_Tahun'].unique()))
         
-        # Filter data spesifik bulan yang dipilih
         df_bulan_ini = df_raw[df_raw['Bulan_Tahun'] == bulan_dipilih]
         
         with col_opt2:
-            tanggal_dipilih = st.selectbox("Pilih Tanggal (Untuk Form ME-45 Harian):", sorted(df_bulan_ini['Tanggal_Lengkap'].unique()))
+            tanggal_dipilih = st.selectbox("Pilih Tanggal (Untuk Cetak Form ME-45):", sorted(df_bulan_ini['Tanggal_Lengkap'].unique()))
             
         tahun_val = int(bulan_dipilih.split('-')[0])
         bulan_val = int(bulan_dipilih.split('-')[1])
@@ -117,27 +119,51 @@ if uploaded_file is not None:
         me45_df = pd.DataFrame({'GMT': range(24)})
         df_hari_ini = df_hari_ini.set_index('Jam')
         
-        # Fungsi merakit Sandi N dd ff VV berdasarkan ketersediaan CSV
-        def format_sandi_angin(jam):
-            if jam in df_hari_ini.index:
-                row = df_hari_ini.loc[jam]
-                dd = row['wind_dir_deg_dd'] if 'wind_dir_deg_dd' in df_hari_ini.columns else np.nan
-                ff = row['wind_speed_ff'] if 'wind_speed_ff' in df_hari_ini.columns else np.nan
+        # --- Fungsi Pembuat Sandi N dd ff VV Otomatis ---
+        def generate_sandi_angin(jam):
+            if jam not in df_hari_ini.index: return ""
+            row = df_hari_ini.loc[jam]
+            
+            # N (Awan Oktas)
+            N = str(int(row['cloud_cover_oktas_m'])) if 'cloud_cover_oktas_m' in row and pd.notna(row['cloud_cover_oktas_m']) else "/"
+            
+            # dd (Arah Angin puluhan derajat)
+            if 'wind_dir_deg_dd' in row and pd.notna(row['wind_dir_deg_dd']):
+                dd = f"{int(round(row['wind_dir_deg_dd'] / 10)):02d}"
+            else:
+                dd = "//"
                 
-                # Konversi dd (derajat ke puluhan, misal 230 -> 23)
-                dd_str = f"{int(round(dd/10)):02d}" if pd.notna(dd) else "//"
-                # Kecepatan knot
-                ff_str = f"{int(ff):02d}" if pd.notna(ff) else "//"
+            # ff (Kecepatan knot)
+            ff = f"{int(row['wind_speed_ff']):02d}" if 'wind_speed_ff' in row and pd.notna(row['wind_speed_ff']) else "//"
+            
+            # VV (Jarak Pandang konversi ke kode SYNOP)
+            VV = "//"
+            if 'visibility_vv' in row and pd.notna(row['visibility_vv']):
+                km = float(row['visibility_vv'])
+                if km < 5.1: VV = f"{int(km*10):02d}"
+                elif km < 31: VV = f"{int(km)+50:02d}"
+                elif km < 71: VV = f"{int(km/5)+80:02d}"
+                else: VV = "99"
                 
-                # Menggunakan garis miring '/' untuk N dan VV karena CSV tidak punya datanya
-                if dd_str != "//" or ff_str != "//":
-                    return f"/ {dd_str} {ff_str} //"
-            return ""
+            return f"{N} {dd} {ff} {VV}"
 
-        me45_df['N dd ff VV'] = me45_df['GMT'].apply(format_sandi_angin)
-        me45_df['ww w1 w2'] = "" # Sengaja dikosongkan karena sandi cuaca tidak ada di CSV
+        # --- Fungsi Pembuat Sandi ww w1 w2 ---
+        def generate_sandi_cuaca(jam):
+            if jam not in df_hari_ini.index: return ""
+            row = df_hari_ini.loc[jam]
+            
+            ww = f"{int(row['present_weather_ww']):02d}" if 'present_weather_ww' in row and pd.notna(row['present_weather_ww']) else "//"
+            w1 = str(int(row['past_weather_w1'])) if 'past_weather_w1' in row and pd.notna(row['past_weather_w1']) else "/"
+            w2 = str(int(row['past_weather_w2'])) if 'past_weather_w2' in row and pd.notna(row['past_weather_w2']) else "/"
+            
+            if ww == "//" and w1 == "/" and w2 == "/": return ""
+            return f"{ww} {w1}{w2}"
+
+        # Memasukkan fungsi ke dalam dataframe
+        me45_df['N dd ff VV'] = me45_df['GMT'].apply(generate_sandi_angin)
+        me45_df['ww w1 w2'] = me45_df['GMT'].apply(generate_sandi_cuaca)
         
-        # Parameter lainnya
+        # Parameter Angka ME-45
         me45_df['TTT'] = me45_df['GMT'].map(df_hari_ini['temp_drybulb_c_tttttt'] if 'temp_drybulb_c_tttttt' in df_hari_ini.columns else {})
         me45_df['TdTdTd'] = me45_df['GMT'].map(df_hari_ini['temp_dewpoint_c_tdtdtd'] if 'temp_dewpoint_c_tdtdtd' in df_hari_ini.columns else {})
         me45_df['TwTwTw'] = me45_df['GMT'].map(df_hari_ini['temp_wetbulb_c'] if 'temp_wetbulb_c' in df_hari_ini.columns else {})
@@ -153,13 +179,14 @@ if uploaded_file is not None:
             wb_me45 = writer_me45.book
             fmt_hdr = wb_me45.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#D9D9D9', 'text_wrap': True})
             fmt_isi = wb_me45.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'})
+            fmt_sandi = wb_me45.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
             fmt_jam = wb_me45.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1})
             
             me45_df.to_excel(writer_me45, sheet_name='ME45_HARIAN', index=False)
             ws_me45 = writer_me45.sheets['ME45_HARIAN']
             
             ws_me45.set_column('A:A', 6, fmt_jam)
-            ws_me45.set_column('B:C', 12, fmt_isi)
+            ws_me45.set_column('B:C', 13, fmt_sandi)
             ws_me45.set_column('D:J', 9, fmt_isi)
             
             for col_num, value in enumerate(me45_df.columns):
@@ -170,6 +197,9 @@ if uploaded_file is not None:
         # TAMPILAN ANTARMUKA DOWNLOAD BERDAMPINGAN
         # =====================================================================
         st.write("---")
+        st.write(f"### 📑 Preview Laporan ME-45 ({tanggal_dipilih})")
+        st.dataframe(me45_df.style.format(precision=1, na_rep=""), use_container_width=True)
+
         st.success("✅ Seluruh Data Berhasil Diproses! Silakan unduh format yang Anda butuhkan:")
         
         dl_col1, dl_col2 = st.columns(2)
@@ -182,17 +212,17 @@ if uploaded_file is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-            st.info("Berisi Laporan Excel Multi-Sheet (Suhu, Kelembapan, Angin, dll) format matriks 24 Jam selama 1 bulan penuh.")
+            st.info("Berisi Laporan Excel Multi-Sheet format matriks 24 Jam selama 1 bulan penuh.")
             
         with dl_col2:
             st.download_button(
-                label=f"📥 2. Unduh ME-45 ({tanggal_dipilih})",
+                label=f"📥 2. Unduh Form ME-45 ({tanggal_dipilih})",
                 data=buffer_me45.getvalue(),
                 file_name=f"ME45_{tanggal_dipilih.replace(' ', '_')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
-            st.warning("Berisi Form Harian ME-45. (Catatan: Sandi Perawanan, Visibility, dan Cuaca 'ww' dikosongkan karena tidak ada di dalam raw data CSV).")
+            st.warning("Formulir Harian. Kini Sandi Awan, Cuaca, Angin, dan Jarak Pandang terisi Otomatis!")
             
     except Exception as e:
         st.error(f"Terjadi kesalahan saat memproses data: {e}")

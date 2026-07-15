@@ -15,11 +15,22 @@ def hitung_tekanan_uap_excel(suhu, rh):
     e_actual = (rh / 100.0) * es
     return round(e_actual * 10, 2) 
 
+# --- RUMUS DEWPOINT (TD) ---
+def hitung_dewpoint(suhu, rh):
+    if pd.isna(suhu) or pd.isna(rh): return np.nan
+    # Menggunakan konstanta Magnus-Tetens
+    a = 17.27
+    b = 237.7
+    alpha = ((a * suhu) / (b + suhu)) + np.log(rh / 100.0)
+    td = (b * alpha) / (a - alpha)
+    return round(td, 2)
+
 # --- PARAMETER MAPPING ---
 parameter_mapping = {
     'pressure_qff_mb_derived': 'QFF RATA-2 HARIAN',
     'pressure_qfe_mb_derived': 'QFE RATA-2 HARIAN',
     'temp_drybulb_c_tttttt': 'SUHU UDARA RATA-2 HARIAN',
+    'Dewpoint': 'SUHU TITIK EMBUN (TD) RATA-2 HARIAN',  # <-- PARAMETER DEWPOINT DITAMBAHKAN
     'relative_humidity_pc': 'KELEMBABAN UDARA RATA-2 HARIAN',
     'wind_speed_ff': 'KECEPATAN ANGIN RATA-2 HARIAN',
     'Tekanan_Uap_x10': 'TEKANAN UAP AIR RATA-2 HARIAN'
@@ -43,8 +54,13 @@ if uploaded_file is not None:
         df_raw['Jam'] = df_raw['data_timestamp'].dt.hour
         
         if 'temp_drybulb_c_tttttt' in df_raw.columns and 'relative_humidity_pc' in df_raw.columns:
+            # Hitung Tekanan Uap
             df_raw['Tekanan_Uap_x10'] = df_raw.apply(
                 lambda row: hitung_tekanan_uap_excel(row['temp_drybulb_c_tttttt'], row['relative_humidity_pc']), axis=1)
+            
+            # Hitung Dewpoint
+            df_raw['Dewpoint'] = df_raw.apply(
+                lambda row: hitung_dewpoint(row['temp_drybulb_c_tttttt'], row['relative_humidity_pc']), axis=1)
         
         df_raw['Bulan_Tahun'] = df_raw['Tahun'].astype(str) + "-" + df_raw['Bulan_Angka'].astype(str).str.zfill(2)
         
@@ -72,9 +88,9 @@ if uploaded_file is not None:
             fmt_header = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#D9D9D9'})
             fmt_blank = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
             fmt_blank_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1'})
-            fmt_qff_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0000'}) # Menampilkan 111 jadi 0111
-            fmt_int_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0'})     # Menampilkan bulat
-            fmt_float_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'}) # Menampilkan 1 desimal 
+            fmt_qff_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0000'}) 
+            fmt_int_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0'})     
+            fmt_float_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'}) 
             fmt_int_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1', 'num_format': '0'})
             fmt_float_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1', 'num_format': '0.0'})
             fmt_summary_judul = wb.add_format({'bold': True, 'align': 'right', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FFF2CC'})
@@ -101,10 +117,10 @@ if uploaded_file is not None:
                         return "", (fmt_blank_rata2 if col_type == 'RATA2' else fmt_blank)
                     return v, (fmt_int_rata2 if col_type == 'RATA2' else fmt_int_biasa)
                 
-                # QFF / QFE / SUHU UDARA (0-23)
+                # QFF / QFE / SUHU UDARA / DEWPOINT (0-23)
                 if 'QFF' in param or 'QFE' in param or 'SUHU' in param:
                     if col_type == '0-23':
-                        if 'SUHU' in param:
+                        if 'SUHU' in param: # Ini juga mencakup "SUHU TITIK EMBUN (TD)"
                             return int(round(float(val) * 10)), fmt_int_biasa
                         
                         return (int(round(float(val) * 10)) % 10000), fmt_qff_biasa

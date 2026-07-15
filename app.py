@@ -2,180 +2,105 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
-import calendar
 
-st.set_page_config(page_title="Sistem ME-45 & Rekap Cuaca", layout="wide")
+st.set_page_config(page_title="Generator ME-45 Harian", layout="wide")
 
-st.title("🌦️ Auto-Rekapitulasi Data Meteorologi & ME-45")
-st.write("Aplikasi ini mengolah data CSV mentah menjadi 2 jenis output: **Laporan Matriks Per Jam** dan **Laporan Rekap Harian (Format ME-45)**.")
+st.title("📄 Auto-Generate Form ME-45 BMKG (Harian)")
+st.write("Aplikasi ini akan mengubah data CSV Anda menjadi format form **ME-45 Harian** yang persis dengan standar PDF BMKG (Jam menurun ke bawah, Parameter menyamping).")
 
-# --- RUMUS MENGHITUNG TEKANAN UAP AIR ---
-def hitung_tekanan_uap_excel(suhu, rh):
-    if pd.isna(suhu) or pd.isna(rh):
-        return np.nan
-    es = 6.112 * np.exp((17.67 * suhu) / (suhu + 243.5))
-    e_actual = (rh / 100.0) * es
-    return round(e_actual * 10, 2)
-
-# =====================================================================
-# --- DAFTAR PARAMETER (MATRIKS JAM) ---
-# =====================================================================
-parameter_mapping = {
-    'Tekanan_Uap_x10': 'TEKANAN UAP AIR',
-    'temp_drybulb_c_tttttt': 'SUHU BOLA KERING',
-    'temp_wetbulb_c': 'SUHU BOLA BASAH',
-    'relative_humidity_pc': 'KELEMBAPAN (RH)',
-    'temp_dewpoint_c_tdtdtd': 'TITIK EMBUN (DEW)',
-    'pressure_qfe_mb_derived': 'TEKANAN QFE',
-    'pressure_qff_mb_derived': 'TEKANAN QFF',
-    'pressure_reading_mb': 'PRESSURE READING',
-    'temp_max_c_txtxtx': 'SUHU MAKSIMUM',
-    'temp_min_c_tntntn': 'SUHU MINIMUM',
-    'wind_speed_ff': 'KECEPATAN ANGIN (FF)',
-    'wind_dir_deg_dd': 'ARAH ANGIN (DD)'
-}
-
-uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG (Misal: job_3071.csv)", type=["csv"])
+uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG Anda (Misal: job_3071.csv)", type=["csv"])
 
 if uploaded_file is not None:
     try:
-        # 1. Baca Data
-        df_raw = pd.read_csv(uploaded_file)
+        # 1. Baca dan Siapkan Data
+        df = pd.read_csv(uploaded_file)
+        df['data_timestamp'] = pd.to_datetime(df['data_timestamp'])
+        df['Tahun'] = df['data_timestamp'].dt.year
+        df['Bulan'] = df['data_timestamp'].dt.month
+        df['Tanggal'] = df['data_timestamp'].dt.day
+        df['Jam_GMT'] = df['data_timestamp'].dt.hour # Asumsi data sudah dalam waktu yang sesuai
         
-        # 2. Parsing Waktu
-        df_raw['data_timestamp'] = pd.to_datetime(df_raw['data_timestamp'])
-        df_raw['Tahun'] = df_raw['data_timestamp'].dt.year
-        df_raw['Bulan_Angka'] = df_raw['data_timestamp'].dt.month
-        df_raw['Tanggal'] = df_raw['data_timestamp'].dt.day
-        df_raw['Jam'] = df_raw['data_timestamp'].dt.hour
+        # Buat dropdown untuk memilih Hari/Tanggal spesifik
+        df['Tanggal_Lengkap'] = df['data_timestamp'].dt.strftime('%d %B %Y')
+        daftar_tanggal = sorted(df['Tanggal_Lengkap'].unique())
         
-        # 3. Hitung Parameter Tambahan
-        if 'temp_drybulb_c_tttttt' in df_raw.columns and 'relative_humidity_pc' in df_raw.columns:
-            df_raw['Tekanan_Uap_x10'] = df_raw.apply(
-                lambda row: hitung_tekanan_uap_excel(row['temp_drybulb_c_tttttt'], row['relative_humidity_pc']), 
-                axis=1
-            )
+        tanggal_pilih = st.selectbox("Pilih Tanggal Observasi untuk dicetak ke ME-45:", daftar_tanggal)
+        df_hari_ini = df[df['Tanggal_Lengkap'] == tanggal_pilih].copy()
         
-        # Filter pilihan bulan
-        df_raw['Bulan_Tahun'] = df_raw['Tahun'].astype(str) + "-" + df_raw['Bulan_Angka'].astype(str).str.zfill(2)
-        daftar_bulan_unik = sorted(df_raw['Bulan_Tahun'].unique())
+        # 2. Susun Struktur Tabel Persis ME-45
+        # Kita buat DataFrame kosong 24 Jam (00 - 23)
+        me45_df = pd.DataFrame({'GMT': range(24)})
         
-        bulan_dipilih = st.selectbox("Pilih Bulan untuk Preview & Download Excel:", daftar_bulan_unik)
-        df_bulan_ini = df_raw[df_raw['Bulan_Tahun'] == bulan_dipilih]
+        # Gabungkan data aktual ke kerangka 24 jam
+        df_hari_ini = df_hari_ini.set_index('Jam_GMT')
         
-        tahun_val = int(bulan_dipilih.split('-')[0])
-        bulan_val = int(bulan_dipilih.split('-')[1])
-        jml_hari = calendar.monthrange(tahun_val, bulan_val)[1]
-        semua_tanggal = pd.Index(range(1, jml_hari + 1), name='TANGGAL')
+        # Mapping parameter dari CSV ke format Header ME-45
+        me45_df['N dd ff VV'] = "" # Kolom sandi yang butuh input visual
+        me45_df['ww w1 w2'] = ""
         
-        # ==========================================
-        # FUNGSI A: BUAT EXCEL MATRIKS PER JAM (AWAL)
-        # ==========================================
-        buffer_jam = io.BytesIO()
-        with pd.ExcelWriter(buffer_jam, engine='xlsxwriter') as writer:
+        # TTT (Suhu Udara)
+        me45_df['TTT'] = me45_df['GMT'].map(df_hari_ini['temp_drybulb_c_tttttt'] if 'temp_drybulb_c_tttttt' in df_hari_ini.columns else {})
+        # TdTdTd (Titik Embun)
+        me45_df['TdTdTd'] = me45_df['GMT'].map(df_hari_ini['temp_dewpoint_c_tdtdtd'] if 'temp_dewpoint_c_tdtdtd' in df_hari_ini.columns else {})
+        # TwTwTw (Suhu Bola Basah)
+        me45_df['TwTwTw'] = me45_df['GMT'].map(df_hari_ini['temp_wetbulb_c'] if 'temp_wetbulb_c' in df_hari_ini.columns else {})
+        # QFF
+        me45_df['QFF'] = me45_df['GMT'].map(df_hari_ini['pressure_qff_mb_derived'] if 'pressure_qff_mb_derived' in df_hari_ini.columns else {})
+        # QFE
+        me45_df['QFE'] = me45_df['GMT'].map(df_hari_ini['pressure_qfe_mb_derived'] if 'pressure_qfe_mb_derived' in df_hari_ini.columns else {})
+        # Tx (Suhu Max)
+        me45_df['TxTxTx'] = me45_df['GMT'].map(df_hari_ini['temp_max_c_txtxtx'] if 'temp_max_c_txtxtx' in df_hari_ini.columns else {})
+        # Tn (Suhu Min)
+        me45_df['TnTnTn'] = me45_df['GMT'].map(df_hari_ini['temp_min_c_tntntn'] if 'temp_min_c_tntntn' in df_hari_ini.columns else {})
+        
+        # Perbaiki format GMT menjadi 00, 01, 02 dst
+        me45_df['GMT'] = me45_df['GMT'].apply(lambda x: f"{x:02d}")
+        
+        # --- TAMPILAN PREVIEW ---
+        st.write("---")
+        st.write(f"### 📑 Preview Laporan ME-45 ({tanggal_pilih})")
+        st.dataframe(me45_df.style.format(precision=1, na_rep=""), use_container_width=True)
+        
+        # --- EXPORT KE EXCEL DENGAN DESAIN MIRIP PDF ---
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             workbook = writer.book
-            format_judul = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#8DB4E2', 'border': 1})
-            format_data = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'})
-            format_tanggal = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#EBF1DE', 'border': 1})
             
-            for kolom_csv, nama_sheet in parameter_mapping.items():
-                if kolom_csv in df_bulan_ini.columns:
-                    pivot = df_bulan_ini.pivot_table(index='Tanggal', columns='Jam', values=kolom_csv, aggfunc='first')
-                    for hour in range(24):
-                        if hour not in pivot.columns: pivot[hour] = np.nan
-                    pivot = pivot[list(range(24))]
-                    pivot.columns = [f"{float(h)}" for h in range(24)]
-                    pivot = pivot.reindex(semua_tanggal)
-                    
-                    if kolom_csv == 'Tekanan_Uap_x10':
-                        pivot['RATA-RATA'] = pivot.iloc[:, 0:24].mean(axis=1) / 10
-                    else:
-                        pivot['RATA-RATA'] = pivot.iloc[:, 0:24].mean(axis=1)
-                        
-                    safe_sheet_name = nama_sheet[:31]
-                    pivot.to_excel(writer, sheet_name=safe_sheet_name)
-                    ws = writer.sheets[safe_sheet_name]
-                    ws.set_column('A:A', 8, format_tanggal)
-                    ws.set_column('B:Y', 7, format_data)
-                    ws.set_column('Z:Z', 12, format_data)
-                    ws.write(0, 0, "NO.", format_judul)
-                    for col_num, value in enumerate(pivot.columns.values):
-                        ws.write(0, col_num + 1, value, format_judul)
-                        
-        # ==========================================
-        # FUNGSI B: BUAT EXCEL REKAP HARIAN (ME-45)
-        # ==========================================
-        # Agregasi data per tanggal untuk mendapatkan Max, Min, dan Mean
-        df_me45 = pd.DataFrame(index=semua_tanggal)
-        
-        if 'temp_max_c_txtxtx' in df_bulan_ini.columns:
-            df_me45['Tx (Suhu Max)'] = df_bulan_ini.groupby('Tanggal')['temp_max_c_txtxtx'].max()
-        if 'temp_min_c_tntntn' in df_bulan_ini.columns:
-            df_me45['Tn (Suhu Min)'] = df_bulan_ini.groupby('Tanggal')['temp_min_c_tntntn'].min()
-        if 'temp_drybulb_c_tttttt' in df_bulan_ini.columns:
-            df_me45['T (Suhu Rata-rata)'] = df_bulan_ini.groupby('Tanggal')['temp_drybulb_c_tttttt'].mean()
-        if 'relative_humidity_pc' in df_bulan_ini.columns:
-            df_me45['RH (%) Rata-rata'] = df_bulan_ini.groupby('Tanggal')['relative_humidity_pc'].mean()
-        if 'pressure_qfe_mb_derived' in df_bulan_ini.columns:
-            df_me45['QFE (mb) Rata-rata'] = df_bulan_ini.groupby('Tanggal')['pressure_qfe_mb_derived'].mean()
-        if 'pressure_qff_mb_derived' in df_bulan_ini.columns:
-            df_me45['QFF (mb) Rata-rata'] = df_bulan_ini.groupby('Tanggal')['pressure_qff_mb_derived'].mean()
-        if 'wind_speed_ff' in df_bulan_ini.columns:
-            df_me45['Angin Max (Knot)'] = df_bulan_ini.groupby('Tanggal')['wind_speed_ff'].max()
-            df_me45['Angin Rata-rata (Knot)'] = df_bulan_ini.groupby('Tanggal')['wind_speed_ff'].mean()
-        
-        buffer_me45 = io.BytesIO()
-        with pd.ExcelWriter(buffer_me45, engine='xlsxwriter') as writer2:
-            workbook2 = writer2.book
-            format_header = workbook2.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#FFC000', 'border': 1, 'text_wrap': True})
-            format_isi = workbook2.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'})
-            format_tgl = workbook2.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D9D9D9', 'border': 1})
+            # Buat format styling persis form cetak BMKG
+            format_header = workbook.add_format({
+                'bold': True, 'align': 'center', 'valign': 'vcenter',
+                'border': 1, 'bg_color': '#D9D9D9', 'text_wrap': True
+            })
+            format_isi = workbook.add_format({
+                'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'
+            })
+            format_jam = workbook.add_format({
+                'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1
+            })
             
-            df_me45.to_excel(writer2, sheet_name='REKAP HARIAN ME-45')
-            ws2 = writer2.sheets['REKAP HARIAN ME-45']
+            me45_df.to_excel(writer, sheet_name='ME45_HARIAN', index=False)
+            ws = writer.sheets['ME45_HARIAN']
             
-            # Styling Excel ME45
-            ws2.set_column('A:A', 10, format_tgl)
-            ws2.set_column('B:Z', 15, format_isi)
-            ws2.set_row(0, 30) # Tinggi baris judul
+            # Set Lebar Kolom agar rapi saat diprint
+            ws.set_column('A:A', 6, format_jam)     # GMT
+            ws.set_column('B:C', 12, format_isi)    # Sandi Visual
+            ws.set_column('D:J', 9, format_isi)     # Parameter Angka
             
-            ws2.write(0, 0, "TANGGAL", format_header)
-            for col_num, value in enumerate(df_me45.columns):
-                ws2.write(0, col_num + 1, value, format_header)
+            # Tulis Header Spesifik
+            for col_num, value in enumerate(me45_df.columns):
+                ws.write(0, col_num, value, format_header)
+                
+            # Tambahkan info Hari/Tanggal di atas tabel (seperti di PDF)
+            ws.write(0, 0, "GMT", format_header)
+
+        st.success(f"✅ Form ME-45 untuk {tanggal_pilih} berhasil dibuat!")
         
-        # ==========================================
-        # TAMPILAN ANTARMUKA APLIKASI
-        # ==========================================
-        st.write("---")
-        st.subheader("📑 Preview Rekap Harian ME-45 (Agregasi Max/Min/Rata-rata)")
-        st.dataframe(df_me45.style.format(precision=1), use_container_width=True)
-        
-        st.write("---")
-        st.success(f"✅ Seluruh Data Bulan {bulan_dipilih} Berhasil Diproses!")
-        st.write("Silakan pilih format laporan yang ingin Anda unduh di bawah ini:")
-        
-        # Tombol Download Berjejer (Side-by-side)
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.download_button(
-                label="📥 1. Unduh Laporan Per Jam (Multi-Sheet)",
-                data=buffer_jam.getvalue(),
-                file_name=f"LAPORAN_JAM_BMKG_{bulan_dipilih}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            st.info("Berisi 12 Sheet Excel yang mendetail dari Jam 00.00 - 23.00 untuk setiap parameter.")
-            
-        with col2:
-            st.download_button(
-                label="📥 2. Unduh Rekap ME-45 (Tabel Harian)",
-                data=buffer_me45.getvalue(),
-                file_name=f"REKAP_ME45_BMKG_{bulan_dipilih}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            st.warning("Berisi 1 Sheet Excel yang merangkum data per tanggal (Maksimum, Minimum, dan Rata-rata Harian).")
+        st.download_button(
+            label=f"📥 Unduh Excel ME-45 ({tanggal_pilih})",
+            data=buffer.getvalue(),
+            file_name=f"ME45_{tanggal_pilih.replace(' ', '_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
             
     except Exception as e:
-        st.error(f"Terjadi kesalahan saat memproses data: {e}")
+        st.error(f"Terjadi kesalahan: {e}")

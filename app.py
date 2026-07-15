@@ -4,10 +4,9 @@ import numpy as np
 import io
 import calendar
 
-st.set_page_config(page_title="Generator Matriks Fklim BMKG", layout="wide")
+st.set_page_config(page_title="Data Extract Job", layout="wide")
 
-st.title("📊 Auto-Generate Excel Matriks Fklim (1 Sheet)")
-st.write("Format 100% Standar Fklim. Data diekspor sebagai **ANGKA MURNI (Numeric)** dengan *Excel Custom Format*, sehingga sel bisa dihitung / dimasukkan rumus matematika tanpa error `#DIV/0!`.")
+st.title("📊 EXCEL PARAMETER RATA-RATA KLIMAT")
 
 # --- RUMUS TEKANAN UAP AIR ---
 def hitung_tekanan_uap_excel(suhu, rh):
@@ -26,7 +25,7 @@ parameter_mapping = {
     'Tekanan_Uap_x10': 'TEKANAN UAP AIR RATA-2 HARIAN'
 }
 
-uploaded_file = st.file_uploader("Unggah file CSV Raw Data BMKG Anda", type=["csv"])
+uploaded_file = st.file_uploader("Unggah file...", type=["csv"])
 
 if uploaded_file is not None:
     try:
@@ -60,28 +59,24 @@ if uploaded_file is not None:
         semua_tanggal = pd.Index(range(1, jml_hari + 1), name='NO.')
 
         # =====================================================================
-        # PROSES EXCEL DENGAN NUMBER FORMATTING MURNI
+        # PROSES EXCEL DENGAN NUMBER FORMATTING
         # =====================================================================
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             wb = writer.book
-            ws = wb.add_worksheet('MATRIKS FKLIM')
+            ws = wb.add_worksheet('MATRIKS')
             
-            # Format Kosmetik Dasar
+            # Format Cell
             fmt_teks = wb.add_format({'bold': True, 'align': 'left'})
             fmt_judul = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 12})
             fmt_header = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#D9D9D9'})
             fmt_blank = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
             fmt_blank_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1'})
-            
-            # FORMAT ANGKA MURNI (Excel akan menganggap ini NUMBER, bukan Text)
             fmt_qff_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0000'}) # Menampilkan 111 jadi 0111
             fmt_int_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0'})     # Menampilkan bulat
-            fmt_float_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'}) # Menampilkan 1 desimal
-            
+            fmt_float_biasa = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '0.0'}) # Menampilkan 1 desimal 
             fmt_int_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1', 'num_format': '0'})
             fmt_float_rata2 = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#DCE6F1', 'num_format': '0.0'})
-            
             fmt_summary_judul = wb.add_format({'bold': True, 'align': 'right', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FFF2CC'})
             fmt_summary_kosong = wb.add_format({'border': 1, 'bg_color': '#FFF2CC'})
             fmt_summary_final_int = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#FCD5B4', 'num_format': '0'})
@@ -95,7 +90,6 @@ if uploaded_file is not None:
             
             start_row = 0
             
-            # Helper untuk mengembalikan tipe data Number (int/float) alih-alih String
             def get_cell(val, param, col_type):
                 if pd.isna(val): 
                     return "", (fmt_blank_rata2 if col_type == 'RATA2' else fmt_blank)
@@ -112,7 +106,7 @@ if uploaded_file is not None:
                     if col_type == '0-23':
                         if 'SUHU' in param:
                             return int(round(float(val) * 10)), fmt_int_biasa
-                        # Hitungan membuang ribuan QFF agar Excel format 0000 membacanya benar
+                        
                         return (int(round(float(val) * 10)) % 10000), fmt_qff_biasa
                     else:
                         return round(float(val), 1), (fmt_float_rata2 if col_type == 'RATA2' else fmt_float_biasa)
@@ -139,8 +133,7 @@ if uploaded_file is not None:
                     
                     rata_harian = pivot.mean(axis=1)
                     if 'UAP AIR' in judul_param: rata_harian = rata_harian / 10
-                    
-                    # LOGIKA KUSTOM PER PARAMETER
+
                     if 'UAP AIR' in judul_param:
                         extra_headers = []
                         summary_labels = []
@@ -223,11 +216,11 @@ if uploaded_file is not None:
                         
                     start_row = row_idx + 3 
 
-        st.success("✅ Format Angka Murni Diterapkan. Anda kini bisa menggunakan rumus Excel di sel mana pun!")
+        st.success("✅ Sukses!")
         st.download_button(
-            label=f"📥 Unduh Laporan Fklim Lengkap ({bulan_dipilih})",
+            label=f"📥 Unduh... ({bulan_dipilih})",
             data=buffer.getvalue(),
-            file_name=f"FKLIM_{bulan_dipilih}.xlsx",
+            file_name=f"Matriks_{bulan_dipilih}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
